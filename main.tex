@@ -69,7 +69,14 @@
   xleftmargin=0.4em,
   xrightmargin=0.4em,
   aboveskip=0.4em,
-  belowskip=0.2em
+  belowskip=0.2em,
+  literate=
+    {á}{{\'a}}1 {à}{{\`a}}1 {ã}{{\~a}}1 {â}{{\^a}}1
+    {é}{{\'e}}1 {ê}{{\^e}}1
+    {í}{{\'i}}1
+    {ó}{{\'o}}1 {õ}{{\~o}}1 {ô}{{\^o}}1
+    {ú}{{\'u}}1
+    {ç}{{\c{c}}}1
 }
 
 \newcommand{\eyebrow}[1]{{\color{caipyraOrange}\small\bfseries #1}\par\vspace{0.25em}}
@@ -264,48 +271,167 @@ def trata_comando(conexao, cmd):
   \end{columns}
 \end{frame}
 
-\begin{frame}[fragile]{Camada de transporte: TCP}
-  \eyebrow{Estado, ACK, temporizador e janela}
+\begin{frame}{Camada de transporte: TCP}
+  \begin{columns}[T,onlytextwidth]
+    \column{0.35\linewidth}
+    \eyebrow{P2: a prática mais difícil}
+    \begin{tightitemize}
+      \item TCP é uma máquina de estados
+      \item eventos mudam variáveis como \texttt{base}, janela e timer
+      \item Go-Back-N é o modelo didático mais próximo do transmissor
+    \end{tightitemize}
+
+    \vspace{0.6em}
+    \callout{\footnotesize
+      A ideia central: confiabilidade aparece de ACKs, temporizadores e
+      retransmissões, não de uma chamada mágica de socket.
+    }
+
+    \column{0.61\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{assets/kurose_gbn_fsm.pdf}
+
+    \vspace{-0.2em}
+    {\tiny\color{caipyraMuted} FSM do transmissor Go-Back-N, Kurose \& Ross}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{TCP em Python: eventos viram callbacks}
+  \begin{columns}[T,onlytextwidth]
+    \column{0.54\linewidth}
+    \eyebrow{Chegada de segmento da camada de rede}
 \begin{lstlisting}[style=py]
-if (flags & FLAGS_ACK) != 0 and ack_no > self.send_base:
-    self.not_acked_queue = self.not_acked_queue[ack_no-self.send_base:]
+class Servidor:
+    def __init__(self, rede, porta):
+        self.rede = rede
+        self.rede.registrar_recebedor(
+            self._rdt_rcv)
+
+    def _rdt_rcv(self, src, dst, segment):
+        ...
+        conexao._rdt_rcv(seq_no, ack_no,
+                         flags, payload)
+\end{lstlisting}
+
+    \column{0.40\linewidth}
+    \eyebrow{Como o asyncio ajuda}
+    \begin{tightitemize}
+      \item a camada IP chama \texttt{\_rdt\_rcv} quando chega um segmento
+      \item esse método é a transição \texttt{rdt\_rcv(rcvpkt)} da FSM
+      \item o código não precisa ficar preso em um \texttt{while} esperando pacote
+    \end{tightitemize}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{TCP em Python: timer e ACK atualizam estado}
+  \begin{columns}[T,onlytextwidth]
+    \column{0.47\linewidth}
+    \eyebrow{Expiração de timer}
+\begin{lstlisting}[style=py]
+def _start_timer(self):
+    timeout = self.estimated_rtt + \
+              4*self.dev_rtt
+    loop = asyncio.get_event_loop()
+    self.timer = loop.call_later(
+        timeout,
+        self._timer_callback)
+
+def _timer_callback(self):
+    payload = self.not_acked_queue[:MSS]
+    if payload:
+        segmento = ...  # retransmissão
+        self.servidor.rede.enviar(
+            segmento, self.dst_addr)
+    self._start_timer()
+\end{lstlisting}
+
+    \column{0.49\linewidth}
+    \eyebrow{ACK cumulativo recebido}
+\begin{lstlisting}[style=py]
+if ack_no > self.send_base:
+    delta = ack_no - self.send_base
+    self.not_acked_queue = \
+        self.not_acked_queue[delta:]
     self.send_base = ack_no
-    if len(self.not_acked_queue) > 0:
+
+    if self.not_acked_queue:
         self._start_timer()
     else:
         self._stop_timer()
 
-while self.not_sent_queue and len(self.not_acked_queue) < self.win*MSS:
-    payload = self.not_sent_queue[:MSS]
-    segmento = make_header(self.src_port, self.dst_port,
-                           self.seq_no, self.ack_no, FLAGS_ACK) + payload
-    self.seq_no += len(payload)
-    self.servidor.rede.enviar(segmento, self.dst_addr)
+    self._send_win()
 \end{lstlisting}
-\end{frame}
-
-\begin{frame}{TCP como exercício de sistemas}
-  \begin{columns}[T,onlytextwidth]
-    \column{0.32\linewidth}
-    \metric{3-way}{handshake}{SYN, SYN+ACK, ACK}
-
-    \column{0.32\linewidth}
-    \metric{RTT}{temporização}{timeout adaptativo}
-
-    \column{0.32\linewidth}
-    \metric{janela}{controle}{reenvio e congestionamento}
   \end{columns}
 
-  \vspace{1.2em}
-  \callout{
-    O valor didático está em ver que confiabilidade não é uma propriedade mágica
-    do socket: ela aparece de números de sequência, ACKs, buffers, timers e
-    decisões de retransmissão.
+  \vspace{0.25em}
+  \callout{\footnotesize
+    Com \texttt{asyncio}, eventos da FSM aparecem como chamadas de função:
+    chegada de ACK e expiração de timer atualizam filas, janela e temporizador.
   }
 \end{frame}
 
+\begin{frame}{IPv4: destino final ou roteador?}
+  \begin{columns}[T,onlytextwidth]
+    \column{0.52\linewidth}
+    \eyebrow{A primeira decisão}
+    \resizebox{\linewidth}{!}{%
+    \begin{tikzpicture}[
+      >=Latex,
+      node distance=0.65cm,
+      box/.style={
+        draw=caipyraLine,
+        fill=caipyraPaper,
+        rounded corners=2pt,
+        inner sep=5pt,
+        text width=3.1cm,
+        align=center,
+        font=\scriptsize
+      },
+      decision/.style={
+        draw=caipyraOrange,
+        diamond,
+        aspect=2.2,
+        inner sep=1.5pt,
+        text width=2.4cm,
+        align=center,
+        font=\scriptsize\bfseries
+      },
+      arrow/.style={->, thick, draw=caipyraRed}
+    ]
+      \node[box] (pkt) {Datagrama IPv4 recebido};
+      \node[decision, below=of pkt] (dec) {destino é meu IP?};
+      \node[box, below left=0.55cm and 0.1cm of dec] (local) {entrega local\\TCP, UDP ou ICMP};
+      \node[box, below right=0.55cm and 0.1cm of dec] (forward) {encaminha\\para outro salto};
+
+      \draw[arrow] (pkt) -- (dec);
+      \draw[arrow] (dec) -- node[left, font=\tiny, color=caipyraMuted] {sim} (local);
+      \draw[arrow] (dec) -- node[right, font=\tiny, color=caipyraMuted] {não} (forward);
+    \end{tikzpicture}
+    }
+
+    \column{0.44\linewidth}
+    \eyebrow{Por que isso importa}
+    {\footnotesize
+    \begin{tightitemize}
+      \item o mesmo código pode receber pacotes destinados à própria máquina
+      \item se o destino é local, o payload sobe para a camada de transporte
+      \item se não é local, o sistema age como roteador
+      \item só nesse segundo caso entra a tabela de rotas
+    \end{tightitemize}
+    }
+
+    \vspace{0.25em}
+    \callout{\scriptsize
+      O slide seguinte mostra justamente essa parte de roteador:
+      escolher o próximo salto por \textit{longest prefix match}.
+    }
+  \end{columns}
+\end{frame}
+
 \begin{frame}[fragile]{Camada de rede: IPv4}
-  \eyebrow{Cabeçalho, checksum, TTL e longest prefix match}
+  \begin{columns}[T,onlytextwidth]
+    \column{0.52\linewidth}
+    \eyebrow{Escolher o próximo salto}
 \begin{lstlisting}[style=py]
 def _next_hop(self, dest_addr):
     dest_addr = str2naddr(dest_addr)
@@ -314,32 +440,31 @@ def _next_hop(self, dest_addr):
         net, nbits = cidr.split("/")
         net = str2naddr(net)
         nbits = int(nbits)
-        mask = 0xffffffff >> (32-nbits) << (32-nbits)
-        if nbits > best_match_n and net == (dest_addr & mask):
+        mask = 0xffffffff >> (32-nbits)
+        mask = mask << (32-nbits)
+        is_match = net == (dest_addr & mask)
+        if nbits > best_match_n and is_match:
             best_match = next_hop
             best_match_n = nbits
     return best_match
 \end{lstlisting}
-\end{frame}
 
-\begin{frame}{IPv4: host e roteador no mesmo código}
-  \begin{columns}[T,onlytextwidth]
-    \column{0.48\linewidth}
-    \eyebrow{Se o destino sou eu}
+    \column{0.44\linewidth}
+    \eyebrow{Longest prefix match}
+    {\footnotesize
     \begin{tightitemize}
-      \item valida cabeçalho
-      \item entrega segmento ao TCP
-      \item respeita protocolo do payload
+      \item roteador consulta uma tabela: prefixo $\rightarrow$ próximo salto
+      \item \texttt{192.168.10.0/24} cobre todos os destinos com esses 24 bits iniciais
+      \item \textit{longest prefix match}: entre rotas compatíveis, vence a mais específica
+      \item isso permite uma rota geral e exceções mais detalhadas na mesma tabela
     \end{tightitemize}
+    }
 
-    \column{0.48\linewidth}
-    \eyebrow{Se o destino é outro}
-    \begin{tightitemize}
-      \item decrementa TTL
-      \item recalcula checksum
-      \item escolhe next hop
-      \item emite ICMP Time Exceeded
-    \end{tightitemize}
+    \vspace{0.25em}
+    \callout{\scriptsize
+      No código, a máscara compara só o prefixo; \texttt{best\_match\_n}
+      guarda a rota compatível mais específica.
+    }
   \end{columns}
 \end{frame}
 
@@ -374,12 +499,12 @@ def __raw_recv(self, dados):
     \foreach \a/\b in {app/tcp,tcp/ip,ip/slip,slip/serial}
       \draw[-{Latex[length=2.5mm]}, thick, caipyraMuted] (\a) -- (\b);
 
-    \node[align=left, right=1.5cm of tcp, text width=5.7cm] {
+    \node[align=left, right=1.0cm of tcp, text width=6.7cm] {
       \eyebrow{Interface de cada camada}
       \texttt{registrar\_recebedor(callback)}\\
       \texttt{enviar(payload, destino)}\\[0.4em]
       \footnotesize
-      O callback explicita a direção ``subindo'', e o método \texttt{enviar}
+      O callback explicita a direção \mbox{``subindo''}, e o método \texttt{enviar}
       explicita a direção ``descendo''.
     };
   \end{tikzpicture}
