@@ -743,7 +743,7 @@ class ZyboSerialDriver:
 
 \begin{frame}{Quando Python deixa de ser a melhor escolha?}
   \eyebrow{Tecnologia de Comunicação}
-  \begin{tabular}{@{}p{0.28\linewidth}p{0.28\linewidth}p{0.34\linewidth}@{}}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.28\linewidth}>{\raggedright\arraybackslash}p{0.18\linewidth}>{\raggedright\arraybackslash}p{0.44\linewidth}@{}}
     \toprule
     Prática & Linguagem & Motivo principal\\
     \midrule
@@ -821,7 +821,7 @@ class ZyboSerialDriver:
     \column{0.48\linewidth}
     \eyebrow{No recorte curricular}
     \begin{tightitemize}
-      \item BCC/EnC São Carlos desde 2018: 0 planos com Rust
+      \item BCC/EnC São Carlos desde 2018: zero planos com Rust
       \item fora do recorte: Sorocaba chegou antes, em 2023/2,
         com Tópicos Avançados em Linguagens de Programação
       \item sem pré-requisito formal (como Python em Redes em 2018)
@@ -943,6 +943,12 @@ class ZyboSerialDriver:
       \item Numba é rápido, mas muda a dificuldade
     \end{tightitemize}
   \end{columns}
+
+  \vspace{0.15em}
+  \callout{\scriptsize
+    Na suíte completa: Viterbi em CPython puro, 55,0 s; em Numba, 35,0 s
+    (36,6 s incluindo compilação inicial). Diferença observada: cerca de 20 s.
+  }
 \end{frame}
 
 \begin{frame}{JIT experimental do Python 3.14}
